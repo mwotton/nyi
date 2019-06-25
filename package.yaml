@@ -1,0 +1,28 @@
+name:                nyi
+version:             0.1.0.0
+#synopsis:
+#description:
+homepage:            https://github.com/githubuser/nyi#readme
+license:             BSD3
+author:              Author name here
+maintainer:          example@example.com
+copyright:           2019 Author name here
+category:            Web
+extra-source-files:
+- README.md
+
+dependencies:
+  - base >= 4.7 && < 5
+  - template-haskell
+
+library:
+  source-dirs: ./src
+
+tests:
+  nyi-tests:
+    main: Main.hs
+    source-dirs: test
+    dependencies:
+      - hspec
+      - nyi
+      - pretty-show
