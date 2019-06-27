@@ -8,52 +8,69 @@
 --   so a test can verify that there are none left. This allows both exploratory
 --   hacking and validates that nothing slips through the test suite.
 --
---   Some code derived from the placeholders package.
+--   It would be preferable to be allowed to use inline `nyi`, but I haven't found
+--   a way to extract a Dec from an Exp and have it be floated up.
+--
+--   Some code derived from the placeholders package, much more derived from
+--   https://gitlab.haskell.org/ghc/ghc/wikis/template-haskell/annotations
 
 {-# LANGUAGE TemplateHaskell #-}
-module Debug.NYI(nyi,todo,allNotImplemented,PlaceholderException(..)) where
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveAnyClass #-}
+module Debug.NYI(nyi,todo,allNotImplemented,Loc(..)) where
 
 import Control.Exception (Exception, throw)
 import Data.Typeable (Typeable)
-import Language.Haskell.TH (Q, Exp, Loc(..), litE, stringL, location, report, runIO)
-import Data.IORef
-import System.IO.Unsafe(unsafePerformIO)
-import Debug.Trace
--- import Data.Map.Strict(insert)
+import Language.Haskell.TH.Syntax(Dec,lift,mkName)
+import Language.Haskell.TH.Instances()
+import Language.Haskell.TH (varP,  AnnLookup(AnnLookupModule), AnnTarget(ModuleAnnotation), ExpQ, Loc(..), ModuleInfo(..), Q
+                           , litE, location, pragAnnD, reifyAnnotations, reifyModule, stringL, thisModule)
+import qualified Data.Set as Set
+
+type NYI = (String, Loc)
+
+nyi :: String -> Q [Dec]
+nyi fn = placeholderNoWarning fn "Not yet implemented"
+
+todo :: String -> String -> Q [Dec]
+todo = placeholderNoWarning
+
+allNotImplemented :: ExpQ
+allNotImplemented = do
+  anns <- traverseAnnotations
+  [| anns |]
+
+traverseAnnotations :: Q [NYI]
+traverseAnnotations = do
+  ModuleInfo children <- reifyModule =<< thisModule
+  go children Set.empty []
+  where
+    go []     _visited acc = return acc
+    go (x:xs) visited  acc
+      | x `Set.member` visited = go xs visited acc
+      | otherwise = do
+          ModuleInfo newMods <- reifyModule x
+          newAnns <- reifyAnnotations $ AnnLookupModule x
+          go (newMods ++ xs) (x `Set.insert` visited) (newAnns ++ acc)
 
 -- | Thrown when attempting to evaluate a placeholder at runtime.
 data PlaceholderException = PlaceholderException String
-    deriving (Show, Typeable)
+    deriving stock (Show, Typeable)
+    deriving anyclass Exception
 
-instance Exception PlaceholderException
-
-allNotImplemented :: IO [(String, Loc)]
-allNotImplemented = readIORef notImplementedCache
-
-{-# NOINLINE notImplementedCache #-}
-notImplementedCache :: IORef [(String,Loc)]
-notImplementedCache = unsafePerformIO $ newIORef mempty
-
-{-# NOINLINE nyi #-}
-nyi = placeholderNoWarning "Not yet implemented"
-{-# NOINLINE todo #-}
-todo = placeholderNoWarning
-
-placeholderNoWarning :: String -> Q Exp
-placeholderNoWarning msg = do
+placeholderNoWarning :: String -> String -> Q [Dec]
+placeholderNoWarning funcName msg = do
   loc <- location
-  traceM $ show ("called", loc, msg)
-  _ <- runIO $ atomicModifyIORef notImplementedCache (\current -> ((msg,loc):current,()))
-  let runtimeMsg = formatMessage msg loc
-  [| do
+  anno <- (:[]) <$> pragAnnD ModuleAnnotation (lift (msg, loc))
+  let runtimeMsg = msg ++ " at " ++ formatLoc loc
+  let name = mkName funcName
+  -- TODO: work out how to get a signature in here too.
+  thrower <- [d|$(varP name) = throw $ PlaceholderException $(litE $ stringL runtimeMsg) |]
+  pure (thrower <> anno)
 
-      throw $ PlaceholderException $(litE $ stringL runtimeMsg) |]
-
--- below is some code sourced from https://hackage.haskell.org/package/placeholders-0.1
-formatMessage :: String -> Loc -> String
-formatMessage msg loc = msg ++ " at " ++ formatLoc loc
-
-formatLoc :: Loc -> String
-formatLoc loc = let file = loc_filename loc
-                    (line, col) = loc_start loc
-                in concat [file, ":", show line, ":", show col]
+  where
+    formatLoc :: Loc -> String
+    formatLoc loc =
+      let file = loc_filename loc
+          (line, col) = loc_start loc
+      in concat [file, ":", show line, ":", show col]
