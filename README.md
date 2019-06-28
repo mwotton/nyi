@@ -13,7 +13,8 @@ hacking and validates that nothing slips through the test suite.
 ## Example
 
 ```haskell
-import Debug.NYI
+{-# LANGUAGE TemplateHaskell}
+import Debug.NYI(allNotImplemented)
 import A
 
 main = hspec $ spec $
@@ -23,11 +24,15 @@ main = hspec $ spec $
 ```
 
 ```haskell
+{-# LANGUAGE TemplateHaskell}
 module A(foo) where
+import Debug.NYI(todo,nyi)
 
 foo = map importantFunction
 
 $(nyi "importantFunction")
+
+$(todo "otherImportantFunction" "can't do this yet for reason X")
 
 ```
 
@@ -41,3 +46,5 @@ $(nyi "importantFunction")
   a way to extract a Dec from an Exp and have it be floated up.
 - typesigs are not currently generated, so it will fail on `-pedantic` builds.
   this is an important change but not a very difficult one
+- we can only detect `nyi` calls in modules that are transitively imported by
+  our test suite.
